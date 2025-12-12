@@ -1,9 +1,7 @@
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from "vue";
 
-/* -----------------------------
-   State
------------------------------- */
+
 const crime_url = ref("");
 const dialog_err = ref(false);
 const dialogRef = ref(null);
@@ -13,13 +11,13 @@ const map = reactive({
   center: { lat: 44.955139, lng: -93.102222, address: "" },
   zoom: 12,
 
-  // St. Paul bounding box (NW/SE)
+  
   bounds: {
     nw: { lat: 45.008206, lng: -93.217977 },
     se: { lat: 44.883658, lng: -92.993787 },
   },
 
-  // NOTE: we’ll treat these as neighborhood IDs 1..17 in this order
+
   neighborhood_markers: [
     { id: 1, location: [44.942068, -93.020521], marker: null },
     { id: 2, location: [44.977413, -93.025156], marker: null },
@@ -42,25 +40,21 @@ const map = reactive({
 });
 
 const ui = reactive({
-  // location box (address OR "lat,lng")
   locationText: "",
   locationErr: "",
 
-  // crimes
   isReady: false,
   loading: false,
   apiErr: "",
 });
 
 const lookups = reactive({
-  // code -> incident_type
   codeToType: new Map(),
-  // neighborhood_number -> neighborhood_name
   nhoodToName: new Map(),
 });
 
-const crimes = ref([]); // raw incidents from API
-const visibleNeighborhoodIds = ref(new Set()); // ids currently visible in map view
+const crimes = ref([]); 
+const visibleNeighborhoodIds = ref(new Set()); 
 
 const upload = reactive({
   case_number: "",
@@ -76,9 +70,16 @@ const upload = reactive({
   submitting: false,
 });
 
-/* -----------------------------
-   Helpers
------------------------------- */
+const filters = reactive({
+  selectedIncidentTypes: new Set(),   
+  selectedNeighborhoodIds: new Set(), 
+
+  startDate: "", 
+  endDate: "",   
+  limit: 1000,   
+});
+
+
 function clampLatLng(lat, lng) {
   const minLat = map.bounds.se.lat;
   const maxLat = map.bounds.nw.lat;
@@ -91,7 +92,6 @@ function clampLatLng(lat, lng) {
 }
 
 function parseLatLng(text) {
-  // accepts: "44.95,-93.10" or "44.95 -93.10"
   const cleaned = text.trim().replace(/\s+/g, " ");
   const parts = cleaned.includes(",") ? cleaned.split(",") : cleaned.split(" ");
   if (parts.length !== 2) return null;
@@ -103,7 +103,6 @@ function parseLatLng(text) {
 }
 
 function splitDateTime(date_time) {
-  // date_time comes back like "YYYY-MM-DD HH:MM:SS"
   const dt = String(date_time || "");
   return {
     date: dt.slice(0, 10),
@@ -111,9 +110,6 @@ function splitDateTime(date_time) {
   };
 }
 
-/* -----------------------------
-   Nominatim
------------------------------- */
 async function nominatimSearch(q) {
   const url =
     "https://nominatim.openstreetmap.org/search?" +
@@ -148,37 +144,46 @@ async function nominatimReverse(lat, lng) {
   return data?.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
-/* -----------------------------
-   Crime API calls
------------------------------- */
+
 async function fetchCodes() {
   const r = await fetch(`${crime_url.value}/codes`);
   if (!r.ok) throw new Error("Failed to load /codes");
   const data = await r.json();
+
   lookups.codeToType.clear();
-  data.forEach((row) => {
-    // your API returns {code, type}
-    lookups.codeToType.set(Number(row.code), String(row.type));
-  });
+  typeToCodes.clear();
+
+  for (const row of data) {
+    const code = Number(row.code);
+    const type = String(row.type);
+
+    lookups.codeToType.set(code, type);
+
+    if (!typeToCodes.has(type)) typeToCodes.set(type, []);
+    typeToCodes.get(type).push(code);
+  }
 }
 
 async function fetchNeighborhoods() {
   const r = await fetch(`${crime_url.value}/neighborhoods`);
   if (!r.ok) throw new Error("Failed to load /neighborhoods");
   const data = await r.json();
+
   lookups.nhoodToName.clear();
-  data.forEach((row) => {
-    // your API returns {id, name}
-    lookups.nhoodToName.set(Number(row.id), String(row.name));
-  });
+  filters.selectedNeighborhoodIds.clear();
+
+  for (const row of data) {
+    const id = Number(row.id);
+    lookups.nhoodToName.set(id, String(row.name));
+    filters.selectedNeighborhoodIds.add(id); 
+  }
 }
 
 async function fetchIncidents(limit = 1000) {
   const r = await fetch(`${crime_url.value}/incidents?limit=${limit}`);
-  if (!r.ok) throw new Error("Failed to load /incidents");
+  if (!r.ok) throw new Error("Load error");
   const data = await r.json();
 
-  // your /incidents returns rows with date_time (not split)
   crimes.value = (data || []).map((row) => {
     const { date, time } = splitDateTime(row.date_time);
     return {
@@ -194,13 +199,64 @@ async function fetchIncidents(limit = 1000) {
   });
 }
 
-/* -----------------------------
-   Visibility filtering
------------------------------- */
+function buildIncidentQuery() {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit || 1000));
+
+  if (filters.selectedNeighborhoodIds.size > 0) {
+    params.set("neighborhood", Array.from(filters.selectedNeighborhoodIds).join(","));
+  }
+
+  if (filters.startDate) params.set("start_date", filters.startDate);
+  if (filters.endDate) params.set("end_date", filters.endDate);
+
+  if (filters.selectedIncidentTypes.size > 0) {
+    const codes = [];
+    for (const t of filters.selectedIncidentTypes) {
+      const arr = typeToCodes.get(t) || [];
+      for (const c of arr) codes.push(c);
+    }
+    if (codes.length > 0) params.set("code", codes.join(","));
+  }
+
+  return params.toString();
+}
+
+async function updateFromFilters() {
+  ui.apiErr = "";
+  ui.loading = true;
+  try {
+    const q = buildIncidentQuery();
+    const r = await fetch(`${crime_url.value}/incidents?${q}`);
+    if (!r.ok) throw new Error("Failed to load filtered /incidents");
+    const data = await r.json();
+
+    crimes.value = (data || []).map((row) => {
+      const { date, time } = splitDateTime(row.date_time);
+      return {
+        case_number: row.case_number,
+        date,
+        time,
+        code: Number(row.code),
+        incident: row.incident,
+        police_grid: row.police_grid,
+        neighborhood_number: Number(row.neighborhood_number),
+        block: row.block,
+      };
+    });
+    recomputeVisibleNeighborhoods();
+    updateNeighborhoodPopups();
+  } catch (e) {
+    ui.apiErr = "Failed to update incidents with filters.";
+  } finally {
+    ui.loading = false;
+  }
+}
+
 function recomputeVisibleNeighborhoods() {
   if (!map.leaflet) return;
 
-  const b = map.leaflet.getBounds(); // Leaflet LatLngBounds
+  const b = map.leaflet.getBounds(); 
   const visible = new Set();
 
   for (const nm of map.neighborhood_markers) {
@@ -213,7 +269,6 @@ function recomputeVisibleNeighborhoods() {
 }
 
 const crimesInView = computed(() => {
-  // requirement: only show crimes that occurred in neighborhoods visible on the map
   const visible = visibleNeighborhoodIds.value;
   if (!visible || visible.size === 0) return [];
   return crimes.value.filter((c) => visible.has(c.neighborhood_number));
@@ -238,9 +293,7 @@ function updateNeighborhoodPopups() {
   }
 }
 
-/* -----------------------------
-   Map controls
------------------------------- */
+
 async function goToLocation() {
   ui.locationErr = "";
   const text = ui.locationText.trim();
@@ -268,8 +321,7 @@ async function goToLocation() {
     const clamped = clampLatLng(lat, lng);
     map.leaflet.setView([clamped.lat, clamped.lng], Math.max(map.leaflet.getZoom(), 12));
 
-    // update address box to something nice after moving
-    // (moveend handler also does this; this is just “fast feedback”)
+
     ui.locationText = `${clamped.lat.toFixed(6)}, ${clamped.lng.toFixed(6)}`;
   } catch (e) {
     ui.locationErr = "Could not geocode that location.";
@@ -278,20 +330,15 @@ async function goToLocation() {
 
 async function handleMoveEnd() {
   if (!map.leaflet) return;
-
-  // update center
   const c = map.leaflet.getCenter();
   const clamped = clampLatLng(c.lat, c.lng);
   if (clamped.lat !== c.lat || clamped.lng !== c.lng) {
-    // if user managed to drag near edge, snap inside bounds
     map.leaflet.panTo([clamped.lat, clamped.lng], { animate: false });
   }
 
-  // recompute what neighborhoods are visible
   recomputeVisibleNeighborhoods();
   updateNeighborhoodPopups();
 
-  // update input box based on reverse geocode (recommended after pan/zoom ends)
   try {
     const addr = await nominatimReverse(clamped.lat, clamped.lng);
     ui.locationText = addr;
@@ -300,9 +347,7 @@ async function handleMoveEnd() {
   }
 }
 
-/* -----------------------------
-   Markers
------------------------------- */
+
 function initializeNeighborhoodMarkers() {
   for (const nm of map.neighborhood_markers) {
     if (nm.marker) continue;
@@ -311,9 +356,7 @@ function initializeNeighborhoodMarkers() {
   updateNeighborhoodPopups();
 }
 
-/* -----------------------------
-   Startup: API initialization
------------------------------- */
+
 async function initializeCrimes() {
   ui.apiErr = "";
   ui.loading = true;
@@ -321,7 +364,8 @@ async function initializeCrimes() {
   try {
     await fetchCodes();
     await fetchNeighborhoods();
-    await fetchIncidents(1000);
+    filters.limit = 1000;
+    await updateFromFilters();
 
     initializeNeighborhoodMarkers();
     recomputeVisibleNeighborhoods();
@@ -329,7 +373,7 @@ async function initializeCrimes() {
 
     ui.isReady = true;
   } catch (e) {
-    ui.apiErr = "Could not load data from your Crime API. Check the URL and that the server is running.";
+    ui.apiErr = "Could not load data.";
     ui.isReady = false;
   } finally {
     ui.loading = false;
