@@ -1,22 +1,27 @@
 <script setup>
-import { reactive, ref, computed, onMounted, watch } from "vue";
-
+import { reactive, ref, computed, onMounted } from "vue";
 
 const crime_url = ref("");
 const dialog_err = ref(false);
 const dialogRef = ref(null);
 
+const ui = reactive({
+  isReady: false,
+  loading: false,
+  apiErr: "",
+  locationText: "",
+  locationErr: "",
+});
+
 const map = reactive({
   leaflet: null,
-  center: { lat: 44.955139, lng: -93.102222, address: "" },
+  center: { lat: 44.955139, lng: -93.102222 },
   zoom: 12,
 
-  
   bounds: {
     nw: { lat: 45.008206, lng: -93.217977 },
     se: { lat: 44.883658, lng: -92.993787 },
   },
-
 
   neighborhood_markers: [
     { id: 1, location: [44.942068, -93.020521], marker: null },
@@ -39,46 +44,28 @@ const map = reactive({
   ],
 });
 
-const ui = reactive({
-  locationText: "",
-  locationErr: "",
-
-  isReady: false,
-  loading: false,
-  apiErr: "",
-});
-
 const lookups = reactive({
   codeToType: new Map(),
   nhoodToName: new Map(),
 });
 
-const crimes = ref([]); 
-const visibleNeighborhoodIds = ref(new Set()); 
+const typeToCodes = reactive(new Map());
 
-const upload = reactive({
-  case_number: "",
-  date: "",
-  time: "",
-  code: "",
-  incident: "",
-  police_grid: "",
-  neighborhood_number: "",
-  block: "",
-  err: "",
-  ok: "",
-  submitting: false,
-});
+const crimes = ref([]);
+const visibleNeighborhoodIds = ref(new Set());
 
 const filters = reactive({
-  selectedIncidentTypes: new Set(),   
-  selectedNeighborhoodIds: new Set(), 
-
-  startDate: "", 
-  endDate: "",   
-  limit: 1000,   
+  selectedIncidentTypes: new Set(),
+  selectedNeighborhoodIds: new Set(),
+  startDate: "",
+  endDate: "",
+  limit: 1000,
 });
 
+const selectedCrime = reactive({
+  case_number: "",
+  marker: null,
+});
 
 function clampLatLng(lat, lng) {
   const minLat = map.bounds.se.lat;
@@ -86,16 +73,16 @@ function clampLatLng(lat, lng) {
   const minLng = map.bounds.nw.lng;
   const maxLng = map.bounds.se.lng;
 
-  const clampedLat = Math.min(maxLat, Math.max(minLat, lat));
-  const clampedLng = Math.min(maxLng, Math.max(minLng, lng));
-  return { lat: clampedLat, lng: clampedLng };
+  return {
+    lat: Math.min(maxLat, Math.max(minLat, lat)),
+    lng: Math.min(maxLng, Math.max(minLng, lng)),
+  };
 }
 
 function parseLatLng(text) {
   const cleaned = text.trim().replace(/\s+/g, " ");
   const parts = cleaned.includes(",") ? cleaned.split(",") : cleaned.split(" ");
   if (parts.length !== 2) return null;
-
   const lat = Number(parts[0]);
   const lng = Number(parts[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -104,24 +91,20 @@ function parseLatLng(text) {
 
 function splitDateTime(date_time) {
   const dt = String(date_time || "");
-  return {
-    date: dt.slice(0, 10),
-    time: dt.slice(11, 19),
-  };
+  return { date: dt.slice(0, 10), time: dt.slice(11, 19) };
 }
 
 async function nominatimSearch(q) {
   const url =
     "https://nominatim.openstreetmap.org/search?" +
-    new URLSearchParams({
-      q,
-      format: "json",
-      limit: "1",
-    });
+    new URLSearchParams({ q, format: "json", limit: "1" });
+
   const r = await fetch(url, { headers: { Accept: "application/json" } });
   if (!r.ok) throw new Error("Nominatim search failed");
+
   const data = await r.json();
   if (!data || data.length === 0) return null;
+
   return {
     lat: Number(data[0].lat),
     lng: Number(data[0].lon),
@@ -132,22 +115,17 @@ async function nominatimSearch(q) {
 async function nominatimReverse(lat, lng) {
   const url =
     "https://nominatim.openstreetmap.org/reverse?" +
-    new URLSearchParams({
-      lat: String(lat),
-      lon: String(lng),
-      format: "json",
-      zoom: "18",
-    });
+    new URLSearchParams({ lat: String(lat), lon: String(lng), format: "json", zoom: "18" });
+
   const r = await fetch(url, { headers: { Accept: "application/json" } });
   if (!r.ok) throw new Error("Nominatim reverse failed");
   const data = await r.json();
   return data?.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
-
 async function fetchCodes() {
   const r = await fetch(`${crime_url.value}/codes`);
-  if (!r.ok) throw new Error("Failed to load /codes");
+  if (!r.ok) throw new Error("Failed /codes");
   const data = await r.json();
 
   lookups.codeToType.clear();
@@ -156,7 +134,6 @@ async function fetchCodes() {
   for (const row of data) {
     const code = Number(row.code);
     const type = String(row.type);
-
     lookups.codeToType.set(code, type);
 
     if (!typeToCodes.has(type)) typeToCodes.set(type, []);
@@ -166,7 +143,7 @@ async function fetchCodes() {
 
 async function fetchNeighborhoods() {
   const r = await fetch(`${crime_url.value}/neighborhoods`);
-  if (!r.ok) throw new Error("Failed to load /neighborhoods");
+  if (!r.ok) throw new Error("Failed /neighborhoods");
   const data = await r.json();
 
   lookups.nhoodToName.clear();
@@ -175,28 +152,8 @@ async function fetchNeighborhoods() {
   for (const row of data) {
     const id = Number(row.id);
     lookups.nhoodToName.set(id, String(row.name));
-    filters.selectedNeighborhoodIds.add(id); 
+    filters.selectedNeighborhoodIds.add(id);
   }
-}
-
-async function fetchIncidents(limit = 1000) {
-  const r = await fetch(`${crime_url.value}/incidents?limit=${limit}`);
-  if (!r.ok) throw new Error("Load error");
-  const data = await r.json();
-
-  crimes.value = (data || []).map((row) => {
-    const { date, time } = splitDateTime(row.date_time);
-    return {
-      case_number: row.case_number,
-      date,
-      time,
-      code: Number(row.code),
-      incident: row.incident,
-      police_grid: row.police_grid,
-      neighborhood_number: Number(row.neighborhood_number),
-      block: row.block,
-    };
-  });
 }
 
 function buildIncidentQuery() {
@@ -228,9 +185,9 @@ async function updateFromFilters() {
   try {
     const q = buildIncidentQuery();
     const r = await fetch(`${crime_url.value}/incidents?${q}`);
-    if (!r.ok) throw new Error("Failed to load filtered /incidents");
-    const data = await r.json();
+    if (!r.ok) throw new Error("Failed /incidents");
 
+    const data = await r.json();
     crimes.value = (data || []).map((row) => {
       const { date, time } = splitDateTime(row.date_time);
       return {
@@ -244,10 +201,11 @@ async function updateFromFilters() {
         block: row.block,
       };
     });
+
     recomputeVisibleNeighborhoods();
     updateNeighborhoodPopups();
   } catch (e) {
-    ui.apiErr = "Failed to update incidents with filters.";
+    ui.apiErr = "Failed to update incidents (check API URL + server).";
   } finally {
     ui.loading = false;
   }
@@ -255,22 +213,19 @@ async function updateFromFilters() {
 
 function recomputeVisibleNeighborhoods() {
   if (!map.leaflet) return;
-
-  const b = map.leaflet.getBounds(); 
+  const b = map.leaflet.getBounds();
   const visible = new Set();
 
   for (const nm of map.neighborhood_markers) {
-    const lat = nm.location[0];
-    const lng = nm.location[1];
+    const [lat, lng] = nm.location;
     if (b.contains([lat, lng])) visible.add(nm.id);
   }
-
   visibleNeighborhoodIds.value = visible;
 }
 
 const crimesInView = computed(() => {
   const visible = visibleNeighborhoodIds.value;
-  if (!visible || visible.size === 0) return [];
+  if (!visible || visible.size === 0) return crimes.value; 
   return crimes.value.filter((c) => visible.has(c.neighborhood_number));
 });
 
@@ -283,16 +238,23 @@ const crimeCountsByNeighborhood = computed(() => {
   return counts;
 });
 
+function initializeNeighborhoodMarkers() {
+  for (const nm of map.neighborhood_markers) {
+    if (nm.marker) continue;
+    nm.marker = L.marker(nm.location).addTo(map.leaflet);
+  }
+  updateNeighborhoodPopups();
+}
+
 function updateNeighborhoodPopups() {
   const counts = crimeCountsByNeighborhood.value;
   for (const nm of map.neighborhood_markers) {
     if (!nm.marker) continue;
-    const nName = lookups.nhoodToName.get(nm.id) || `Neighborhood ${nm.id}`;
+    const name = lookups.nhoodToName.get(nm.id) || `Neighborhood ${nm.id}`;
     const count = counts.get(nm.id) || 0;
-    nm.marker.bindPopup(`<b>${nName}</b><br/>Crimes in view: ${count}`);
+    nm.marker.bindPopup(`<b>${name}</b><br/>Crimes in view: ${count}`);
   }
 }
-
 
 async function goToLocation() {
   ui.locationErr = "";
@@ -307,11 +269,12 @@ async function goToLocation() {
     let lat, lng;
 
     if (parsed) {
-      ({ lat, lng } = parsed);
+      lat = parsed.lat;
+      lng = parsed.lng;
     } else {
       const hit = await nominatimSearch(text);
       if (!hit) {
-        ui.locationErr = "No results found for that location.";
+        ui.locationErr = "No results found.";
         return;
       }
       lat = hit.lat;
@@ -320,18 +283,18 @@ async function goToLocation() {
 
     const clamped = clampLatLng(lat, lng);
     map.leaflet.setView([clamped.lat, clamped.lng], Math.max(map.leaflet.getZoom(), 12));
-
-
     ui.locationText = `${clamped.lat.toFixed(6)}, ${clamped.lng.toFixed(6)}`;
-  } catch (e) {
-    ui.locationErr = "Could not geocode that location.";
+  } catch {
+    ui.locationErr = "Could not geocode location.";
   }
 }
 
 async function handleMoveEnd() {
   if (!map.leaflet) return;
+
   const c = map.leaflet.getCenter();
   const clamped = clampLatLng(c.lat, c.lng);
+
   if (clamped.lat !== c.lat || clamped.lng !== c.lng) {
     map.leaflet.panTo([clamped.lat, clamped.lng], { animate: false });
   }
@@ -340,27 +303,116 @@ async function handleMoveEnd() {
   updateNeighborhoodPopups();
 
   try {
-    const addr = await nominatimReverse(clamped.lat, clamped.lng);
-    ui.locationText = addr;
+    ui.locationText = await nominatimReverse(clamped.lat, clamped.lng);
   } catch {
     ui.locationText = `${clamped.lat.toFixed(6)}, ${clamped.lng.toFixed(6)}`;
   }
 }
 
+function crimeCategory(c) {
+  const t = (lookups.codeToType.get(c.code) || "").toUpperCase();
+  const i = (c.incident || "").toUpperCase();
 
-function initializeNeighborhoodMarkers() {
-  for (const nm of map.neighborhood_markers) {
-    if (nm.marker) continue;
-    nm.marker = L.marker(nm.location).addTo(map.leaflet);
-  }
-  updateNeighborhoodPopups();
+  const violentHints = ["ASSAULT", "ROBBERY", "RAPE", "HOMICIDE", "MURDER", "KIDNAP", "WEAPON", "DOMESTIC"];
+  if (violentHints.some((h) => t.includes(h) || i.includes(h))) return "violent";
+
+  const propertyHints = ["BURGLARY", "THEFT", "LARCENY", "AUTO THEFT", "VANDAL", "ARSON", "FRAUD", "SHOPLIFT"];
+  if (propertyHints.some((h) => t.includes(h) || i.includes(h))) return "property";
+
+  return "other";
 }
 
+function rowClass(c) {
+  const cat = crimeCategory(c);
+  return {
+    "row-violent": cat === "violent",
+    "row-property": cat === "property",
+    "row-other": cat === "other",
+  };
+}
+
+async function deleteIncident(case_number) {
+  if (!case_number) return;
+  ui.apiErr = "";
+  try {
+    const r = await fetch(`${crime_url.value}/remove-incident`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ case_number }),
+    });
+
+    if (!r.ok) {
+      const txt = await r.text().catch(() => "");
+      throw new Error(txt || "Delete failed");
+    }
+
+    if (selectedCrime.case_number === case_number && selectedCrime.marker) {
+      map.leaflet.removeLayer(selectedCrime.marker);
+      selectedCrime.marker = null;
+      selectedCrime.case_number = "";
+    }
+
+    await updateFromFilters();
+  } catch {
+    ui.apiErr = `Delete failed for ${case_number}.`;
+  }
+}
+
+function normalizeBlockForGeocode(block) {
+  let b = String(block || "").trim();
+  b = b.replace(/^(\d+)X\b/, (_, digits) => `${digits}0`);
+  return b;
+}
+
+async function selectCrime(c) {
+  if (!map.leaflet) return;
+
+  if (selectedCrime.marker) {
+    map.leaflet.removeLayer(selectedCrime.marker);
+    selectedCrime.marker = null;
+  }
+
+  selectedCrime.case_number = c.case_number;
+
+  const query = `${normalizeBlockForGeocode(c.block)}, Saint Paul, MN`;
+  try {
+    const hit = await nominatimSearch(query);
+    if (!hit) return;
+
+    const icon = L.divIcon({
+      className: "selected-crime-icon",
+      html: '<div class="selected-dot"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+
+    selectedCrime.marker = L.marker([hit.lat, hit.lng], { icon }).addTo(map.leaflet);
+
+    const popupId = `del-${c.case_number}`;
+    const html = `
+      <div>
+        <b>${c.date} ${c.time}</b><br/>
+        ${c.incident}<br/>
+        <small>${c.block}</small><br/>
+        <button id="${popupId}" class="button tiny alert" type="button">Delete</button>
+      </div>
+    `;
+
+    selectedCrime.marker.bindPopup(html).openPopup();
+
+    selectedCrime.marker.on("popupopen", () => {
+      const btn = document.getElementById(popupId);
+      if (btn) btn.onclick = () => deleteIncident(c.case_number);
+    });
+
+    map.leaflet.panTo([hit.lat, hit.lng]);
+  } catch {
+  }
+}
 
 async function initializeCrimes() {
   ui.apiErr = "";
   ui.loading = true;
-
   try {
     await fetchCodes();
     await fetchNeighborhoods();
@@ -368,12 +420,11 @@ async function initializeCrimes() {
     await updateFromFilters();
 
     initializeNeighborhoodMarkers();
-    recomputeVisibleNeighborhoods();
-    updateNeighborhoodPopups();
+    await handleMoveEnd();
 
     ui.isReady = true;
-  } catch (e) {
-    ui.apiErr = "Could not load data.";
+  } catch {
+    ui.apiErr = "Could not load data from Crime API. Check URL and server.";
     ui.isReady = false;
   } finally {
     ui.loading = false;
@@ -391,111 +442,36 @@ function closeDialog() {
   initializeCrimes();
 }
 
-/* -----------------------------
-   Upload new incident
------------------------------- */
-async function submitIncident() {
-  upload.err = "";
-  upload.ok = "";
-
-  // required fields
-  const required = [
-    ["case_number", upload.case_number],
-    ["date", upload.date],
-    ["time", upload.time],
-    ["code", upload.code],
-    ["incident", upload.incident],
-    ["police_grid", upload.police_grid],
-    ["neighborhood_number", upload.neighborhood_number],
-    ["block", upload.block],
-  ];
-
-  const missing = required.filter(([, v]) => String(v).trim() === "");
-  if (missing.length) {
-    upload.err = "Please fill out all fields before submitting.";
-    return;
-  }
-
-  upload.submitting = true;
-  try {
-    const body = {
-      case_number: String(upload.case_number).trim(),
-      date: String(upload.date).trim(),
-      time: String(upload.time).trim(),
-      code: Number(upload.code),
-      incident: String(upload.incident).trim(),
-      police_grid: Number(upload.police_grid),
-      neighborhood_number: Number(upload.neighborhood_number),
-      block: String(upload.block).trim(),
-    };
-
-    const r = await fetch(`${crime_url.value}/new-incident`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const payload = await r.json().catch(() => ({}));
-
-    if (!r.ok) {
-      // your API uses 400 for missing, 500 for duplicate
-      upload.err = payload?.error || "Upload failed.";
-      return;
-    }
-
-    upload.ok = `Uploaded incident (${body.case_number}). Refreshing…`;
-
-    // refresh list (still “most recent first”)
-    await fetchIncidents(1000);
-    recomputeVisibleNeighborhoods();
-    updateNeighborhoodPopups();
-  } catch (e) {
-    upload.err = "Upload failed (network/server error).";
-  } finally {
-    upload.submitting = false;
-  }
-}
-
-/* -----------------------------
-   Leaflet init
------------------------------- */
 onMounted(() => {
-  // Create Leaflet map
   map.leaflet = L.map("leafletmap").setView([map.center.lat, map.center.lng], map.zoom);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     minZoom: 11,
     maxZoom: 18,
   }).addTo(map.leaflet);
 
-  // prevent panning outside St Paul
   map.leaflet.setMaxBounds([
     [map.bounds.se.lat, map.bounds.nw.lng],
     [map.bounds.nw.lat, map.bounds.se.lng],
   ]);
 
-  // boundaries overlay
   const district_boundary = new L.geoJson();
   district_boundary.addTo(map.leaflet);
 
   fetch("data/StPaulDistrictCouncil.geojson")
     .then((r) => r.json())
-    .then((geo) => {
-      geo.features.forEach((f) => district_boundary.addData(f));
-    })
+    .then((geo) => geo.features.forEach((f) => district_boundary.addData(f)))
     .catch((err) => console.log("GeoJSON error:", err));
 
-  // update location + filtering after pan/zoom ENDS
   map.leaflet.on("moveend", handleMoveEnd);
 
-  // set initial location text
   ui.locationText = `${map.center.lat.toFixed(6)}, ${map.center.lng.toFixed(6)}`;
 });
 </script>
 
 <template>
-  <!-- API URL dialog -->
   <dialog id="rest-dialog" ref="dialogRef" open>
     <h1 class="dialog-header">St. Paul Crime REST API</h1>
     <label class="dialog-label">URL:</label>
@@ -514,7 +490,6 @@ onMounted(() => {
   </dialog>
 
   <div class="grid-container">
-    <!-- Controls -->
     <div class="grid-x grid-padding-x align-middle controls">
       <div class="cell small-12 medium-8">
         <label class="small-label">Location (address or lat,lng)</label>
@@ -529,21 +504,88 @@ onMounted(() => {
 
       <div class="cell small-12 medium-4 text-right">
         <span v-if="ui.loading">Loading…</span>
-        <span v-else-if="ui.isReady">
-          Showing <b>{{ crimesInView.length }}</b> crimes in view
+        <span v-else>
+          Showing <b>{{ crimesInView.length }}</b> crimes (visible neighborhoods filter applied)
         </span>
       </div>
     </div>
 
-    <!-- Map -->
+    <div class="grid-x grid-padding-x grid-margin-y">
+      <div class="cell small-12 medium-4">
+        <h2 class="section-title">Filters</h2>
+
+        <label>Max incidents</label>
+        <select v-model.number="filters.limit">
+          <option :value="250">250</option>
+          <option :value="500">500</option>
+          <option :value="1000">1000</option>
+          <option :value="2000">2000</option>
+        </select>
+
+        <div class="grid-x grid-padding-x">
+          <div class="cell small-6">
+            <label>Start date</label>
+            <input type="date" v-model="filters.startDate" />
+          </div>
+          <div class="cell small-6">
+            <label>End date</label>
+            <input type="date" v-model="filters.endDate" />
+          </div>
+        </div>
+
+        <button class="button expanded" type="button" @click="updateFromFilters">
+          Update
+        </button>
+
+        <p class="inline-error" v-if="ui.apiErr">{{ ui.apiErr }}</p>
+      </div>
+
+      <div class="cell small-12 medium-4">
+        <h3 class="sub-title">Neighborhoods</h3>
+        <div class="scroll-box">
+          <label v-for="[id, name] in Array.from(lookups.nhoodToName.entries())" :key="id">
+            <input
+              type="checkbox"
+              :checked="filters.selectedNeighborhoodIds.has(id)"
+              @change="(e) => {
+                if (e.target.checked) filters.selectedNeighborhoodIds.add(id);
+                else filters.selectedNeighborhoodIds.delete(id);
+              }"
+            />
+            {{ name }}
+          </label>
+        </div>
+      </div>
+
+      <div class="cell small-12 medium-4">
+        <h3 class="sub-title">Incident Types</h3>
+        <div class="scroll-box">
+          <label v-for="t in Array.from(typeToCodes.keys()).sort()" :key="t">
+            <input
+              type="checkbox"
+              :checked="filters.selectedIncidentTypes.has(t)"
+              @change="(e) => {
+                if (e.target.checked) filters.selectedIncidentTypes.add(t);
+                else filters.selectedIncidentTypes.delete(t);
+              }"
+            />
+            {{ t }}
+          </label>
+        </div>
+      </div>
+    </div>
+
     <div class="grid-x grid-padding-x">
       <div id="leafletmap" class="cell"></div>
     </div>
-
-    <!-- Table + Upload -->
     <div class="grid-x grid-padding-x grid-margin-y">
-      <div class="cell small-12 medium-7">
-        <h2 class="section-title">Crimes (visible neighborhoods only)</h2>
+      <div class="cell small-12">
+        <h2 class="section-title">Crimes (click a row to drop an exact marker)</h2>
+        <div class="legend">
+          <span class="legend-item legend-violent">Violent</span>
+          <span class="legend-item legend-property">Property</span>
+          <span class="legend-item legend-other">Other</span>
+        </div>
 
         <table class="hover stack">
           <thead>
@@ -553,73 +595,34 @@ onMounted(() => {
               <th>Neighborhood</th>
               <th>Incident Type</th>
               <th>Block</th>
+              <th>Delete</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in crimesInView" :key="c.case_number">
+            <tr
+              v-for="c in crimesInView"
+              :key="c.case_number"
+              :class="rowClass(c)"
+              @click="selectCrime(c)"
+              style="cursor: pointer;"
+            >
               <td>{{ c.date }}</td>
               <td>{{ c.time }}</td>
               <td>{{ lookups.nhoodToName.get(c.neighborhood_number) || c.neighborhood_number }}</td>
               <td>{{ lookups.codeToType.get(c.code) || c.code }}</td>
               <td>{{ c.block }}</td>
+              <td>
+                <button class="button tiny alert" type="button" @click.stop="deleteIncident(c.case_number)">
+                  Delete
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
-      </div>
 
-      <div class="cell small-12 medium-5">
-        <h2 class="section-title">Upload New Incident</h2>
-
-        <div class="callout">
-          <label>Case Number
-            <input type="text" v-model="upload.case_number" />
-          </label>
-
-          <div class="grid-x grid-padding-x">
-            <div class="cell small-6">
-              <label>Date
-                <input type="date" v-model="upload.date" />
-              </label>
-            </div>
-            <div class="cell small-6">
-              <label>Time
-                <input type="time" step="1" v-model="upload.time" />
-              </label>
-            </div>
-          </div>
-
-          <div class="grid-x grid-padding-x">
-            <div class="cell small-6">
-              <label>Code
-                <input type="number" v-model="upload.code" />
-              </label>
-            </div>
-            <div class="cell small-6">
-              <label>Police Grid
-                <input type="number" v-model="upload.police_grid" />
-              </label>
-            </div>
-          </div>
-
-          <label>Incident (text)
-            <input type="text" v-model="upload.incident" />
-          </label>
-
-          <label>Neighborhood Number (1–17)
-            <input type="number" v-model="upload.neighborhood_number" />
-          </label>
-
-          <label>Block
-            <input type="text" v-model="upload.block" />
-          </label>
-
-          <p class="inline-error" v-if="upload.err">{{ upload.err }}</p>
-          <p class="inline-ok" v-if="upload.ok">{{ upload.ok }}</p>
-
-          <button class="button expanded" type="button" @click="submitIncident" :disabled="upload.submitting">
-            {{ upload.submitting ? "Submitting…" : "Submit (PUT /new-incident)" }}
-          </button>
-        </div>
+        <p class="hint">
+          Note: exact locations are estimated by geocoding the obscured block (e.g., 98X → 980). Street-name X’s are not modified.
+        </p>
       </div>
     </div>
   </div>
@@ -676,8 +679,65 @@ onMounted(() => {
   color: #d32323;
 }
 
-.inline-ok {
-  margin: 0.25rem 0 0;
-  color: #1a7f37;
+.scroll-box {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid #ddd;
+  padding: 0.5rem;
+  background: #fff;
+}
+
+.sub-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.legend {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.legend-item {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.legend-violent {
+  background: #ffd6d6;
+}
+.legend-property {
+  background: #d6e8ff;
+}
+.legend-other {
+  background: #e6e6e6;
+}
+
+.row-violent td {
+  background: #ffd6d6;
+}
+.row-property td {
+  background: #d6e8ff;
+}
+.row-other td {
+  background: #e6e6e6;
+}
+
+.selected-crime-icon .selected-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: #d32323;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}
+
+.hint {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: #555;
 }
 </style>
