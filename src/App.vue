@@ -591,10 +591,7 @@ onMounted(() => {
       </div>
 
       <div class="cell small-12 medium-4 text-right">
-        <span v-if="ui.loading">Loading…</span>
-        <span v-else>
-          Showing <b>{{ crimesInView.length }}</b> crimes (visible neighborhoods filter applied)
-        </span>
+
       </div>
     </div>
 

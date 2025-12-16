@@ -3,12 +3,16 @@
     "description": "St Paul Crime Single Page Application",
     "version": "1.0.0",
     "author": {
-        "name": "",
-        "email": ""
+        "name": "Ryan Soltis",
+        "email": "solt4052@stthomas.edu"
     },
     "contributors": [
     ],
-    "repository": {},
+    "repository": {
+    "type": "git",
+    "url": "https://github.com/ryansoltz/CISC375-Project3.git"
+
+    },
     "type": "module",
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
