@@ -23,6 +23,8 @@ const map = reactive({
     se: { lat: 44.883658, lng: -92.993787 },
   },
 
+  
+
   neighborhood_markers: [
     { id: 1, location: [44.942068, -93.020521], marker: null },
     { id: 2, location: [44.977413, -93.025156], marker: null },
@@ -44,6 +46,7 @@ const map = reactive({
   ],
 });
 
+
 const lookups = reactive({
   codeToType: new Map(),
   nhoodToName: new Map(),
@@ -53,6 +56,20 @@ const typeToCodes = reactive(new Map());
 
 const crimes = ref([]);
 const visibleNeighborhoodIds = ref(new Set());
+
+const upload = reactive({
+  case_number: "",
+  date: "",
+  time: "",
+  code: "",
+  incident: "",
+  police_grid: "",
+  neighborhood_number: "",
+  block: "",
+  err: "",
+  ok: "",
+  submitting: false,
+});
 
 const filters = reactive({
   selectedIncidentTypes: new Set(),
@@ -442,6 +459,63 @@ function closeDialog() {
   initializeCrimes();
 }
 
+async function submitIncident() {
+  upload.err = "";
+  upload.ok = "";
+
+  const required = [
+    upload.case_number,
+    upload.date,
+    upload.time,
+    upload.code,
+    upload.incident,
+    upload.police_grid,
+    upload.neighborhood_number,
+    upload.block,
+  ];
+
+  if (required.some((v) => String(v).trim() === "")) {
+    upload.err = "Please fill out all fields before submitting.";
+    return;
+  }
+
+  upload.submitting = true;
+  try {
+    const body = {
+      case_number: String(upload.case_number).trim(),
+      date: String(upload.date).trim(),
+      time: String(upload.time).trim(),
+      code: Number(upload.code),
+      incident: String(upload.incident).trim(),
+      police_grid: Number(upload.police_grid),
+      neighborhood_number: Number(upload.neighborhood_number),
+      block: String(upload.block).trim(),
+    };
+
+    const r = await fetch(`${crime_url.value}/new-incident`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const payload = await r.json().catch(() => ({}));
+
+    if (!r.ok) {
+      upload.err = payload?.error || "Upload failed.";
+      return;
+    }
+
+    upload.ok = `Uploaded incident ${body.case_number}.`;
+    
+    await updateFromFilters();
+
+  } catch (e) {
+    upload.err = "Upload failed (server/network error).";
+  } finally {
+    upload.submitting = false;
+  }
+}
+
 onMounted(() => {
   map.leaflet = L.map("leafletmap").setView([map.center.lat, map.center.lng], map.zoom);
 
@@ -489,6 +563,20 @@ onMounted(() => {
     <button class="button" type="button" @click="closeDialog">OK</button>
   </dialog>
 
+  <div class="grid-container">
+    <div class="grid-x grid-padding-x align-middle">
+      <div class="cell medium-8">
+        <h1>St. Paul Crime Map</h1>
+      </div>
+      <div class="cell medium-2">
+        <a ref="">Crime Map</a>
+      </div>
+      <div class="cell medium-2">
+        <a href="about.html">About</a>
+      </div>      
+    </div>
+  </div>
+</br>
   <div class="grid-container">
     <div class="grid-x grid-padding-x align-middle controls">
       <div class="cell small-12 medium-8">
@@ -578,6 +666,64 @@ onMounted(() => {
     <div class="grid-x grid-padding-x">
       <div id="leafletmap" class="cell"></div>
     </div>
+
+    <div class="grid-x grid-padding-x grid-margin-y">
+      <div class="cell small-12 medium-5">
+        <h2 class="section-title">Upload New Incident</h2>
+
+        <div class="callout">
+          <label>Case Number
+            <input type="text" v-model="upload.case_number" />
+          </label>
+
+          <div class="grid-x grid-padding-x">
+            <div class="cell small-6">
+              <label>Date
+                <input type="date" v-model="upload.date" />
+              </label>
+            </div>
+            <div class="cell small-6">
+              <label>Time
+                <input type="time" step="1" v-model="upload.time" />
+              </label>
+            </div>
+          </div>
+
+          <div class="grid-x grid-padding-x">
+            <div class="cell small-6">
+              <label>Code
+                <input type="number" v-model="upload.code" />
+              </label>
+            </div>
+            <div class="cell small-6">
+              <label>Police Grid
+                <input type="number" v-model="upload.police_grid" />
+              </label>
+            </div>
+          </div>
+
+          <label>Incident (text)
+            <input type="text" v-model="upload.incident" />
+          </label>
+
+          <label>Neighborhood Number (1–17)
+            <input type="number" v-model="upload.neighborhood_number" />
+          </label>
+
+          <label>Block
+            <input type="text" v-model="upload.block" placeholder="79X 6 ST E" />
+          </label>
+
+          <p class="inline-error" v-if="upload.err">{{ upload.err }}</p>
+          <p class="inline-ok" v-if="upload.ok">{{ upload.ok }}</p>
+
+          <button class="button expanded" type="button" @click="submitIncident" :disabled="upload.submitting">
+            {{ upload.submitting ? "Submitting…" : "Submit" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="grid-x grid-padding-x grid-margin-y">
       <div class="cell small-12">
         <h2 class="section-title">Crimes (click a row to drop an exact marker)</h2>
@@ -620,9 +766,7 @@ onMounted(() => {
           </tbody>
         </table>
 
-        <p class="hint">
-          Note: exact locations are estimated by geocoding the obscured block (e.g., 98X → 980). Street-name X’s are not modified.
-        </p>
+
       </div>
     </div>
   </div>
@@ -645,17 +789,20 @@ onMounted(() => {
 }
 
 .section-title {
+  font-family: Tahoma; 
   font-size: 1.15rem;
   font-weight: 700;
   margin-top: 0.5rem;
 }
 
 .small-label {
+  font-family: Tahoma; 
   font-size: 0.95rem;
   font-weight: 600;
 }
 
 .dialog-header {
+  font-family: Tahoma; 
   font-size: 1.2rem;
   font-weight: bold;
 }
@@ -665,16 +812,19 @@ onMounted(() => {
 }
 
 .dialog-input {
+  font-family: Tahoma; 
   font-size: 1rem;
   width: 100%;
 }
 
 .dialog-error {
+  font-family: Tahoma; 
   font-size: 1rem;
   color: #d32323;
 }
 
 .inline-error {
+  font-family: Tahoma; 
   margin: 0.25rem 0 0;
   color: #d32323;
 }
@@ -688,6 +838,7 @@ onMounted(() => {
 }
 
 .sub-title {
+  font-family: Tahoma; 
   font-size: 1rem;
   font-weight: 700;
   margin-bottom: 0.25rem;
@@ -700,6 +851,7 @@ onMounted(() => {
 }
 
 .legend-item {
+  font-family: Tahoma; 
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   font-weight: 700;
@@ -736,8 +888,11 @@ onMounted(() => {
 }
 
 .hint {
+  font-family: Tahoma; 
   margin-top: 0.5rem;
   font-size: 0.9rem;
   color: #555;
 }
+
+
 </style>
