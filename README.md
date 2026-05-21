@@ -7,3 +7,17 @@ A webapp for viewing and recording St. Paul crime data. Written primarily in Vue
 After successfully getting the webapp running and going to the local URL (after following the Installation Instructions), and entering the URL the API is being hosted on, you are able to:
 
 ## Installation Instructions
+
+### Prerequisites
+- Node.js 18+
+
+### 1. Setup Crime API [(Link to repo if want to clone on web)](https://github.com/ryansoltz/CISC375-Project3)
+```bash
+git clone https://github.com/ryansoltz/CISC375-Project3
+cd CISC375-Project3
+#Copy crime database to db folder
+npm install
+node rest_server.mjs
+#The url to the API should be http://localhost:8000 (important for step 2)
+```
+
