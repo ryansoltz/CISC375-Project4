@@ -4,8 +4,14 @@ A webapp for viewing and recording St. Paul crime data. Written primarily in Vue
 
 ## Usage Instructions
 
+
 After successfully getting the webapp running and going to the local URL (after following the Installation Instructions, should be http://localhost:5173), and entering the URL the API is being hosted on, you are able to:
-- 
+- View an interactive map of St. Paul that lists crimes that have occured
+- View a list of all reported crimes (including information about date, time, neighborhood, type, and address)
+- Delete crimes from the list
+- Report a new crime incident to be added to the list
+- Filter the crime data to choose what crimes you want displayed
+- Provide an exact location to see what (if any) crimes occured there
 
 ## Installation Instructions
 
