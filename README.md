@@ -4,7 +4,7 @@ A webapp for viewing and recording St. Paul crime data. Written primarily in Vue
 
 ## Usage Instructions
 
-After successfully getting the webapp running and going to the local URL (after following the Installation Instructions), and entering the URL the API is being hosted on, you are able to:
+After successfully getting the webapp running and going to the local URL (after following the Installation Instructions, should be http://localhost:5173), and entering the URL the API is being hosted on, you are able to:
 
 ## Installation Instructions
 
@@ -19,5 +19,13 @@ cd CISC375-Project3
 npm install
 node rest_server.mjs
 #The url to the API should be http://localhost:8000 (important for step 2)
+```
+### 2. Run the Webapp
+```bash
+#Can use this code or can clone using your IDE
+git clone https://github.com/ryansoltz/CISC375-Project4
+cd CISC375-Project4
+npm install
+npm run dev
 ```
 
