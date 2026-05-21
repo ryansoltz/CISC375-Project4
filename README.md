@@ -4,4 +4,6 @@ A webapp for viewing and recording St. Paul crime data. Written primarily in Vue
 
 ## Usage Instructions
 
+After successfully getting the webapp running and going to the local URL (after following the Installation Instructions), and entering the URL the API is being hosted on, you are able to:
+
 ## Installation Instructions
